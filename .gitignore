@@ -1,0 +1,50 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+-/
+Torana/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+config.yaml
+config.local.yaml
+*.pem
+*.p8
+*.key
+**/token.json
+
+# Logs and generated runtime files
+logs/
+temp_files/
+*.log
+
+# IDE and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local packaging/build artifacts
+build/
+dist/
+*.egg-info/
+
+# Local backup files
+*.backup
+
+# Project-specific Snowflake table DDL
+/setup/snowflake_dwh._setup.sql

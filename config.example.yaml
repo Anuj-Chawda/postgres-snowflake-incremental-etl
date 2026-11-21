@@ -1,0 +1,30 @@
+# ==========================================
+# PostgreSQL to Snowflake ETL Configuration
+# ==========================================
+
+# ETL Settings
+# Tables selected for synchronization.
+# Supply a string containing a Python list of PostgreSQL table names.
+# The list is established during initial setup.
+tables: "['icedw_object_dim', 'icedw_execution_fct']"
+
+# PostgreSQL Connection
+pg_host: "YOUR_POSTGRES_HOST"
+pg_port: 5432
+pg_database: "YOUR_POSTGRES_DATABASE"
+pg_schema: "YOUR_POSTGRES_SCHEMA"
+pg_user: "YOUR_POSTGRES_USERNAME"
+pg_password: "REPLACE_WITH_ENCRYPTED_PASSWORD"
+
+# Snowflake Connection
+sf_account: "YOUR_SNOWFLAKE_ACCOUNT"
+sf_database: "YOUR_SNOWFLAKE_DATABASE"
+sf_schema: "YOUR_SNOWFLAKE_SCHEMA"
+sf_user: "YOUR_SNOWFLAKE_USERNAME"
+sf_role: "YOUR_SNOWFLAKE_ROLE"
+sf_warehouse: "YOUR_SNOWFLAKE_WAREHOUSE"
+
+# Snowflake Private Key Authentication
+# The private key file (rsa_key.p8) must exist locally.
+# Encrypt the passphrase using encryption.py.
+snow_key_pair_passphrase: "REPLACE_WITH_ENCRYPTED_PASSPHRASE"
