@@ -88,11 +88,14 @@ class TableLoader:
 
         self._write_dataframe(df, temp_table)
 
-        self._merge_into_target(table, temp_table, pk_keys)
-
         max_dttm = df["etl_update_dttm"].max()
 
-        self.control_table.mark_success(table, max_dttm)
+        self._merge_into_target(
+            table,
+            temp_table,
+            pk_keys,
+            max_dttm
+        )
 
         logger.info("Finished processing table: %s", table)
 
@@ -132,16 +135,22 @@ class TableLoader:
             temp_table,
             auto_create_table=False,
             quote_identifiers=False,
-            on_error="CONTINUE"
+            on_error="ABORT_STATEMENT"
         )
 
         if not success:
-
             raise RuntimeError("Snowflake load failed")
+
+        if rows != len(df):
+            raise RuntimeError(
+                f"Snowflake row count mismatch for {temp_table}: "
+                f"expected {len(df)}, loaded {rows}"
+            )
 
         logger.info("Loaded %s rows into %s", rows, temp_table)
 
-    def _merge_into_target(self, table, temp_table, pk_keys):
+
+    def _merge_into_target(self, table, temp_table, pk_keys, max_dttm):
 
         pk_col = pk_keys.get(table)[0]
 
@@ -166,8 +175,39 @@ class TableLoader:
 
         with self.snowflake.connection.cursor() as cursor:
 
-            cursor.execute(delete_query)
-            cursor.execute(insert_query)
-            cursor.execute(drop_query)
+            try:
+                cursor.execute("BEGIN")
+
+                cursor.execute(delete_query)
+                cursor.execute(insert_query)
+
+                # Update the checkpoint within the same transaction.
+                self.control_table.mark_success(
+                    table,
+                    max_dttm,
+                    cursor=cursor
+                )
+
+                cursor.execute("COMMIT")
+
+            except Exception:
+                try:
+                    cursor.execute("ROLLBACK")
+                except Exception:
+                    logger.exception(
+                        "Rollback failed for table: %s", table
+                    )
+                raise
+
+            finally:
+                # Keep DDL outside the transaction.
+                try:
+                    cursor.execute(drop_query)
+                except Exception:
+                    logger.warning(
+                        "Unable to clean staging table: %s",
+                        temp_table,
+                        exc_info=True
+                    )
 
         logger.info("Merged data into %s", table)

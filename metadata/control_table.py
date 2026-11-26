@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 
 logger = logging.getLogger(__name__)
 
@@ -68,9 +68,12 @@ class ControlTable:
         with self.snowflake.connection.cursor() as cursor:
             cursor.execute(query)
 
-    def mark_success(self, table_name, max_timestamp):
+    def mark_success(self, table_name, max_timestamp, cursor=None):
         """
         Update checkpoint after successful load.
+
+        If a cursor is provided, reuse it so the checkpoint
+        update can participate in an existing transaction.
         """
 
         max_dttm_str = (
@@ -89,5 +92,21 @@ class ControlTable:
             WHERE table_name = '{table_name}'
         """
 
-        with self.snowflake.connection.cursor() as cursor:
+
+        if cursor is not None:
             cursor.execute(query)
+
+            if cursor.rowcount != 1:
+                raise RuntimeError(
+                    f"Checkpoint update failed for {table_name}: "
+                    f"expected 1 updated row, got {cursor.rowcount}"
+                )
+        else:
+            with self.snowflake.connection.cursor() as new_cursor:
+                new_cursor.execute(query)
+
+                if new_cursor.rowcount != 1:
+                    raise RuntimeError(
+                        f"Checkpoint update failed for {table_name}: "
+                        f"expected 1 updated row, got {new_cursor.rowcount}"
+                    )
