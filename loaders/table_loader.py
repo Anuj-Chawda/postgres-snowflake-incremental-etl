@@ -1,4 +1,5 @@
 import logging
+from sqlalchemy.exc import DBAPIError
 import pandas as pd
 from snowflake.connector.pandas_tools import write_pandas
 
@@ -47,6 +48,7 @@ class TableLoader:
 
                 self._load_single_table(table, pk_keys)
 
+
             except Exception as e:
 
                 logger.error("Failed loading table %s: %s", table, e)
@@ -55,6 +57,26 @@ class TableLoader:
                     table,
                     "Data load error"
                 )
+
+                # Recover only when SQLAlchemy identifies a
+                # database connection invalidation.
+                if isinstance(e, DBAPIError) and e.connection_invalidated:
+
+                    logger.warning(
+                        "PostgreSQL connection lost while loading %s. "
+                        "Attempting reconnection.",
+                        table,
+                    )
+
+                    try:
+                        self.postgres.reconnect()
+
+                    except Exception:
+                        logger.exception(
+                            "PostgreSQL reconnection failed. "
+                            "Stopping further table processing."
+                        )
+                        raise
 
     def _load_single_table(self, table, pk_keys):
 
@@ -80,6 +102,12 @@ class TableLoader:
 
         logger.info("Fetched %s rows from Postgres", len(df))
 
+        # Preserve the original PostgreSQL timestamp for checkpoint tracking.
+        max_dttm = pd.to_datetime(
+            df["etl_update_dttm"],
+            errors="raise"
+        ).max()
+
         df = self._transform_dataframe(df)
 
         temp_table = f"temp_{table}"
@@ -87,8 +115,6 @@ class TableLoader:
         self._create_temp_table(table, temp_table)
 
         self._write_dataframe(df, temp_table)
-
-        max_dttm = df["etl_update_dttm"].max()
 
         self._merge_into_target(
             table,

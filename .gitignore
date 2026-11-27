@@ -48,3 +48,6 @@ dist/
 
 # Project-specific Snowflake table DDL
 /setup/snowflake_dwh._setup.sql
+
+# Local database integration-test credentials
+config.integration.yaml

@@ -1,5 +1,5 @@
 import pandas as pd
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text, bindparam
 
 def schema_comparison(pg_uri, sf_conn, pg_schema, sf_database, sf_schema, tables):
     """
@@ -25,11 +25,14 @@ def schema_comparison(pg_uri, sf_conn, pg_schema, sf_database, sf_schema, tables
               and "tables_compared" as described above.
     """
     # Query to retrieve all columns from the PostgreSQL schema
-    pg_columns_query = f"""
-    SELECT table_name, column_name, data_type
-    FROM information_schema.columns
-    WHERE table_schema = '{pg_schema}' and table_name in {tables};
-    """
+    pg_columns_query = text("""
+        SELECT table_name, column_name, data_type
+        FROM information_schema.columns
+        WHERE table_schema = :schema_name
+        AND table_name IN :table_names
+    """).bindparams(
+        bindparam("table_names", expanding=True)
+    )
 
     # Query to retrieve all columns from the Snowflake schema
     sf_columns_query = f"""
@@ -41,8 +44,16 @@ def schema_comparison(pg_uri, sf_conn, pg_schema, sf_database, sf_schema, tables
 
     # Create a PostgreSQL connection and fetch column details
     pg_engine = create_engine(pg_uri)
+
     with pg_engine.connect() as pg_conn:
-        pg_columns = pd.read_sql_query(pg_columns_query, pg_conn)
+        pg_columns = pd.read_sql_query(
+            pg_columns_query,
+            pg_conn,
+            params={
+                "schema_name": pg_schema,
+                "table_names": tables,
+            }
+        )
 
     # Fetch column details from Snowflake
     with sf_conn.cursor() as cursor:

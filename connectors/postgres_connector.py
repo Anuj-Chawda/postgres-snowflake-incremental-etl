@@ -31,6 +31,31 @@ class PostgresConnector:
             logger.error("Failed to connect to PostgreSQL: %s", e)
             raise
 
+    def reconnect(self) -> None:
+        """
+        Replace the existing PostgreSQL connection after a failure.
+
+        Closing the old connection ends its transaction.
+        A fresh connection is then obtained from the engine.
+        """
+        logger.warning("Reconnecting to PostgreSQL.")
+
+        if self.engine is None:
+            self.connect()
+            return
+
+        if self.connection is not None:
+            self.connection.close()
+            self.connection = None
+
+        try:
+            self.connection = self.engine.connect()
+            logger.info("PostgreSQL connection re-established.")
+
+        except Exception:
+            logger.exception("Failed to reconnect to PostgreSQL.")
+            raise
+
     def test_connection(self) -> bool:
         """Test PostgreSQL connectivity."""
         try:

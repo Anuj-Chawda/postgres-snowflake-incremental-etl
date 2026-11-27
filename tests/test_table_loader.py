@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import MagicMock, patch
-
+from sqlalchemy.exc import OperationalError
 import pandas as pd
 
 from loaders.table_loader import TableLoader
@@ -132,7 +132,7 @@ def test_successful_incremental_load():
         "customers",
         "temp_customers",
         {"customers": ["customer_id"]},
-        "2026-11-21 12:00:00",
+        pd.Timestamp("2026-11-21 12:00:00"),
     )
 
     # The checkpoint is now updated within _merge_into_target(),
@@ -769,3 +769,133 @@ def test_merge_rollback_when_checkpoint_updates_zero_rows():
     assert executed_queries[5].startswith(
         "DROP TABLE IF EXISTS"
     )
+
+def test_postgres_disconnect_triggers_reconnection():
+    """
+    Verify that a PostgreSQL disconnect is recorded and
+    the connection is recovered before loading the next table.
+    """
+
+    postgres = MagicMock()
+    snowflake = MagicMock()
+    control_table = MagicMock()
+
+    postgres.pg_uri = "postgresql://test_user@localhost/test_db"
+
+    loader = TableLoader(
+        postgres=postgres,
+        snowflake=snowflake,
+        control_table=control_table,
+        tables=["customers", "orders"],
+        pg_schema="public",
+        sf_database="TEST_DB",
+        sf_schema="TEST_SCHEMA",
+    )
+
+    # Simulate an SQLAlchemy-recognized PostgreSQL disconnect.
+    disconnect_error = OperationalError(
+        statement="SELECT * FROM public.customers",
+        params=None,
+        orig=Exception("PostgreSQL connection lost"),
+        connection_invalidated=True,
+    )
+
+    def simulate_table_load(table, pk_keys):
+        if table == "customers":
+            raise disconnect_error
+
+    with (
+        patch(
+            "loaders.table_loader.get_primary_keys",
+            return_value={
+                "customers": ["customer_id"],
+                "orders": ["order_id"],
+            },
+        ),
+        patch(
+            "loaders.table_loader.clean_prev_instance_temp_tables",
+        ),
+        patch.object(
+            loader,
+            "_load_single_table",
+            side_effect=simulate_table_load,
+        ) as mock_load,
+    ):
+        loader.load_tables()
+
+    # The failed table should be marked as failed.
+    control_table.mark_failure.assert_called_once_with(
+        "customers",
+        "Data load error",
+    )
+
+    # PostgreSQL connection recovery should be attempted.
+    postgres.reconnect.assert_called_once_with()
+
+    # Processing should continue to the next table.
+    assert mock_load.call_count == 2
+
+    assert mock_load.call_args_list[0].args[0] == "customers"
+    assert mock_load.call_args_list[1].args[0] == "orders"
+
+    # The failed table must not receive a successful checkpoint.
+    control_table.mark_success.assert_not_called()
+
+def test_snowflake_failure_does_not_reconnect_postgres():
+    """
+    Verify that a Snowflake loading failure does not trigger
+    unnecessary PostgreSQL reconnection.
+    """
+
+    postgres = MagicMock()
+    snowflake = MagicMock()
+    control_table = MagicMock()
+
+    postgres.pg_uri = "postgresql://test_user@localhost/test_db"
+
+    loader = TableLoader(
+        postgres=postgres,
+        snowflake=snowflake,
+        control_table=control_table,
+        tables=["customers", "orders"],
+        pg_schema="public",
+        sf_database="TEST_DB",
+        sf_schema="TEST_SCHEMA",
+    )
+
+    def simulate_table_load(table, pk_keys):
+        if table == "customers":
+            raise RuntimeError("Simulated Snowflake loading failure")
+
+    with (
+        patch(
+            "loaders.table_loader.get_primary_keys",
+            return_value={
+                "customers": ["customer_id"],
+                "orders": ["order_id"],
+            },
+        ),
+        patch(
+            "loaders.table_loader.clean_prev_instance_temp_tables",
+        ),
+        patch.object(
+            loader,
+            "_load_single_table",
+            side_effect=simulate_table_load,
+        ) as mock_load,
+    ):
+        loader.load_tables()
+
+    # The failed table must be recorded.
+    control_table.mark_failure.assert_called_once_with(
+        "customers",
+        "Data load error",
+    )
+
+    # No PostgreSQL reconnection should occur.
+    postgres.reconnect.assert_not_called()
+
+    # Processing should continue to the next table.
+    assert mock_load.call_count == 2
+    assert mock_load.call_args_list[0].args[0] == "customers"
+    assert mock_load.call_args_list[1].args[0] == "orders"
